@@ -1,3 +1,4 @@
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 use std::collections::HashMap;
@@ -7,6 +8,9 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 
 extern crate tokio;
@@ -23,40 +27,114 @@ struct ServiceInfo {
     pub to: String,
 }
 
+struct ParsedRule {
+    pub service_name: String,
+    pub rule: Vec<u8>,
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let file_content = fs::read_to_string("config.yml")?;
 
     let proxy_config: ProxyConfig = serde_yaml::from_str(&file_content).unwrap();
 
-    let mut tasks = Vec::new();
-    let services_rules_buffer: Arc<Mutex<HashMap<String, Arc<Mutex<Vec<&[u8]>>>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-
+    let mut channels: HashMap<String, Sender<Vec<u8>>> = HashMap::new();
+    let mut tasks: Vec<BoxFuture<_>> = Vec::new();
     for service in proxy_config.services {
-        let rules_buffer: Arc<Mutex<Vec<&[u8]>>> = Arc::new(Mutex::new(Vec::new()));
-        services_rules_buffer
-            .lock()
-            .await
-            .insert(service.service_name.clone(), rules_buffer.clone());
+        let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(1024);
+        channels.insert(service.service_name.clone(), tx);
 
-        tasks.push(start_service(service, rules_buffer.clone()));
+        tasks.push(Box::pin(start_service(service, rx)));
     }
+    tasks.push(Box::pin(handle_rules(channels)));
 
     futures::future::join_all(tasks).await;
     Ok(())
 }
 
-async fn start_service(service: ServiceInfo, rules_buffer: Arc<Mutex<Vec<&[u8]>>>) -> io::Result<()> {
+fn parse_rule(buffer: &[u8]) -> Option<ParsedRule> {
+    match find_subsequence(buffer, b"||") {
+        Some(index) => {
+            let name = &buffer[0..index];
+            let rule = &buffer[index + 2..];
+
+            let string_name = match std::str::from_utf8(name) {
+                Ok(s) => s,
+                Err(_) => return None,
+            };
+
+            Some(ParsedRule {
+                service_name: string_name.to_string(),
+                rule: rule.to_vec(),
+            })
+        }
+        None => None,
+    }
+}
+
+async fn handle_rules(channels: HashMap<String, Sender<Vec<u8>>>) -> io::Result<()> {
+    let from = "127.0.0.1:1234";
+    let listener = TcpListener::bind(from).await?;
+    println!("Started rule service");
+
+    loop {
+        let (mut socket, addr) = listener.accept().await?;
+        println!("New connection from {:?}!", addr);
+        let (mut client_read, mut client_write) = socket.split();
+
+        let mut buf = [0u8; 1024];
+        let read_bytes = client_read.read(&mut buf).await.unwrap();
+
+        match parse_rule(&buf[..read_bytes - 1]) {
+            Some(rule_info) => match channels.get(&rule_info.service_name) {
+                Some(channel) => {
+                    let send_result = channel.send(rule_info.rule.to_vec()).await;
+                    if send_result.is_ok() {
+                        client_write.write("Rule added!".as_bytes()).await.unwrap();
+                    } else {
+                        client_write
+                            .write("Rule not added...".as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                }
+                None => {
+                    client_write
+                        .write("Invalid service name!".as_bytes())
+                        .await
+                        .unwrap();
+                }
+            },
+            None => {
+                client_write
+                    .write("Invalid rule format!".as_bytes())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+}
+
+async fn start_service(service: ServiceInfo, mut rx: Receiver<Vec<u8>>) -> io::Result<()> {
     let from = &service.from;
     let listener = TcpListener::bind(from).await?;
     println!("Started service {}", service.service_name);
 
+    let rules: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
     loop {
+        let rules_clone = Arc::clone(&rules);
+
         let to = service.to.clone();
         let (mut socket, addr) = listener.accept().await?;
 
-        let rules_buffer = rules_buffer.clone();
+        match rx.try_recv() {
+            Ok(message) => {
+                println!("Thread {:?}: {:?}", service.service_name, message);
+                rules.lock().await.push(message);
+            }
+            Err(_) => {}
+        }
+
         tokio::spawn(async move {
             println!("New connection from {:?}!", addr);
 
@@ -73,12 +151,11 @@ async fn start_service(service: ServiceInfo, rules_buffer: Arc<Mutex<Vec<&[u8]>>
 
             let (cancel, _) = broadcast::channel::<()>(1);
 
+            let rules_reference = rules_clone.lock().await.clone();
             tokio::select! {
-                _ = copy_with_abort(&mut remote_read, &mut client_write, cancel.subscribe(), false) => {},
-                _ = copy_with_abort(&mut client_read, &mut remote_write, cancel.subscribe(), true) => {},
+                _ = copy_with_abort(&mut remote_read, &mut client_write, cancel.subscribe(), false, None) => {},
+                _ = copy_with_abort(&mut client_read, &mut remote_write, cancel.subscribe(), true, Some(rules_reference)) => {},
             };
-
-            //cancel.send(()).unwrap();
         });
     }
 }
@@ -89,6 +166,7 @@ async fn copy_with_abort<R, W>(
     write: &mut W,
     mut abort: broadcast::Receiver<()>,
     is_client: bool,
+    rules: Option<Vec<Vec<u8>>>,
 ) -> tokio::io::Result<usize>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -118,10 +196,10 @@ where
         }
 
         if is_client {
-            //for rule in rules
-
-            if find_subsequence(&buf[0..bytes_read], b".git").is_some() {
-                return Ok(0);
+            for rule in rules.as_ref().unwrap() {
+                if find_subsequence(&buf[0..bytes_read], &rule).is_some() {
+                    return Ok(0);
+                }
             }
             // Other filters...
         }
