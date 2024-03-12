@@ -8,7 +8,8 @@ pub struct ParsedRule {
 }
 
 pub enum RuleAction {
-    AddRule, RemoveRule
+    AddRule,
+    RemoveRule,
 }
 
 #[derive(Deserialize)]

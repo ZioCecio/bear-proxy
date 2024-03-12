@@ -1,6 +1,6 @@
+use sqlite::Connection;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::Sender, Mutex};
-use sqlite::Connection;
 
 use super::rule::ParsedRule;
 

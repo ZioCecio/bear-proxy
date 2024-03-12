@@ -1,5 +1,5 @@
 pub mod controllers;
-pub mod  models;
+pub mod models;
 
 use axum::routing::get;
 use axum::routing::post;
@@ -26,7 +26,6 @@ use tokio::sync::Mutex;
 
 extern crate tokio;
 
-
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let file_content = fs::read_to_string("config.yml")?;
@@ -47,67 +46,17 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-//async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Result<()> {
-//    let from = "127.0.0.1:1234";
-//    let listener = TcpListener::bind(from).await?;
-//    println!("Started rule service");
-//
-//    loop {
-//        let (mut socket, addr) = listener.accept().await?;
-//        println!("New connection from {:?}!", addr);
-//        let (mut client_read, mut client_write) = socket.split();
-//
-//        const BUFFER_SIZE: usize = 1024;
-//        let mut bytes_to_add: Vec<u8> = vec![];
-//        let mut buf = [0u8; BUFFER_SIZE];
-//        let mut read_bytes = BUFFER_SIZE;
-//        let mut cycles = 0;
-//
-//        while read_bytes == BUFFER_SIZE {
-//            read_bytes = client_read.read(&mut buf).await.unwrap();
-//            bytes_to_add.append(&mut buf.to_vec());
-//            cycles += 1;
-//        }
-//
-//        match parse_rule(&bytes_to_add[..(BUFFER_SIZE * (cycles - 1)) + read_bytes - 1], 0) {
-//            Some(rule_info) => match channels.get(&rule_info.service_name) {
-//                Some(channel) => {
-//                    let send_result = channel.send(rule_info).await;
-//                    if send_result.is_ok() {
-//                        client_write.write("Rule added!".as_bytes()).await.unwrap();
-//                    } else {
-//                        client_write
-//                            .write("Rule not added...".as_bytes())
-//                            .await
-//                            .unwrap();
-//                    }
-//                }
-//                None => {
-//                    client_write
-//                        .write("Invalid service name!".as_bytes())
-//                        .await
-//                        .unwrap();
-//                }
-//            },
-//            None => {
-//                client_write
-//                    .write("Invalid rule format!".as_bytes())
-//                    .await
-//                    .unwrap();
-//            }
-//        }
-//    }
-//}
-
 async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Result<()> {
-    
     let connection = sqlite::open(":memory:").unwrap();
     let query = "
         CREATE TABLE rules(id INTEGER, rule TEXT)
     ";
     connection.execute(query).unwrap();
 
-    let shared_state = Arc::new(WebServerState { channels, db_connection: Arc::new(Mutex::new(connection)) });
+    let shared_state = Arc::new(WebServerState {
+        channels,
+        db_connection: Arc::new(Mutex::new(connection)),
+    });
 
     let app = Router::new()
         .route("/rules", get(get_all_rules))
@@ -116,7 +65,7 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:1234").await.unwrap();
     axum::serve(listener, app).await.unwrap();
-    
+
     Ok(())
 }
 
@@ -138,7 +87,7 @@ async fn start_service(service: ServiceInfo, mut rx: Receiver<ParsedRule>) -> io
                     println!("Thread {:?}: {:?}", service.service_name, message.rule);
                     rules.lock().await.push(message.rule);
                 }
-                Err(_) => break
+                Err(_) => break,
             }
         }
 
