@@ -28,8 +28,14 @@ struct ServiceInfo {
 }
 
 struct ParsedRule {
+    pub id: usize,
     pub service_name: String,
     pub rule: Vec<u8>,
+    pub action: RuleAction,
+}
+
+enum RuleAction {
+    AddRule, RemoveRule
 }
 
 #[tokio::main]
@@ -38,10 +44,10 @@ async fn main() -> io::Result<()> {
 
     let proxy_config: ProxyConfig = serde_yaml::from_str(&file_content).unwrap();
 
-    let mut channels: HashMap<String, Sender<Vec<u8>>> = HashMap::new();
+    let mut channels: HashMap<String, Sender<ParsedRule>> = HashMap::new();
     let mut tasks: Vec<BoxFuture<_>> = Vec::new();
     for service in proxy_config.services {
-        let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel(1024);
+        let (tx, rx): (Sender<ParsedRule>, Receiver<ParsedRule>) = mpsc::channel(1024);
         channels.insert(service.service_name.clone(), tx);
 
         tasks.push(Box::pin(start_service(service, rx)));
@@ -52,10 +58,11 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn parse_rule(buffer: &[u8]) -> Option<ParsedRule> {
+fn parse_rule(buffer: &[u8], new_id: usize) -> Option<ParsedRule> {
     match find_subsequence(buffer, b"||") {
         Some(index) => {
-            let name = &buffer[0..index];
+            let action_byte = &buffer[0];
+            let name = &buffer[1..index];
             let rule = &buffer[index + 2..];
 
             let string_name = match std::str::from_utf8(name) {
@@ -63,16 +70,28 @@ fn parse_rule(buffer: &[u8]) -> Option<ParsedRule> {
                 Err(_) => return None,
             };
 
+            let action = match action_byte {
+                b'+' => Some(RuleAction::AddRule),
+                b'-' => Some(RuleAction::RemoveRule),
+                _ => None,
+            };
+
+            if action.is_none() {
+                return None;
+            }
+
             Some(ParsedRule {
+                id: new_id,
                 service_name: string_name.to_string(),
                 rule: rule.to_vec(),
+                action: action.unwrap(),
             })
         }
         None => None,
     }
 }
 
-async fn handle_rules(channels: HashMap<String, Sender<Vec<u8>>>) -> io::Result<()> {
+async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Result<()> {
     let from = "127.0.0.1:1234";
     let listener = TcpListener::bind(from).await?;
     println!("Started rule service");
@@ -82,13 +101,22 @@ async fn handle_rules(channels: HashMap<String, Sender<Vec<u8>>>) -> io::Result<
         println!("New connection from {:?}!", addr);
         let (mut client_read, mut client_write) = socket.split();
 
-        let mut buf = [0u8; 1024];
-        let read_bytes = client_read.read(&mut buf).await.unwrap();
+        const BUFFER_SIZE: usize = 1024;
+        let mut bytes_to_add: Vec<u8> = vec![];
+        let mut buf = [0u8; BUFFER_SIZE];
+        let mut read_bytes = BUFFER_SIZE;
+        let mut cycles = 0;
 
-        match parse_rule(&buf[..read_bytes - 1]) {
+        while read_bytes == BUFFER_SIZE {
+            read_bytes = client_read.read(&mut buf).await.unwrap();
+            bytes_to_add.append(&mut buf.to_vec());
+            cycles += 1;
+        }
+
+        match parse_rule(&bytes_to_add[..(BUFFER_SIZE * (cycles - 1)) + read_bytes - 1], 0) {
             Some(rule_info) => match channels.get(&rule_info.service_name) {
                 Some(channel) => {
-                    let send_result = channel.send(rule_info.rule.to_vec()).await;
+                    let send_result = channel.send(rule_info).await;
                     if send_result.is_ok() {
                         client_write.write("Rule added!".as_bytes()).await.unwrap();
                     } else {
@@ -115,7 +143,7 @@ async fn handle_rules(channels: HashMap<String, Sender<Vec<u8>>>) -> io::Result<
     }
 }
 
-async fn start_service(service: ServiceInfo, mut rx: Receiver<Vec<u8>>) -> io::Result<()> {
+async fn start_service(service: ServiceInfo, mut rx: Receiver<ParsedRule>) -> io::Result<()> {
     let from = &service.from;
     let listener = TcpListener::bind(from).await?;
     println!("Started service {}", service.service_name);
@@ -127,12 +155,14 @@ async fn start_service(service: ServiceInfo, mut rx: Receiver<Vec<u8>>) -> io::R
         let to = service.to.clone();
         let (mut socket, addr) = listener.accept().await?;
 
-        match rx.try_recv() {
-            Ok(message) => {
-                println!("Thread {:?}: {:?}", service.service_name, message);
-                rules.lock().await.push(message);
+        loop {
+            match rx.try_recv() {
+                Ok(message) => {
+                    println!("Thread {:?}: {:?}", service.service_name, message.rule);
+                    rules.lock().await.push(message.rule);
+                }
+                Err(_) => break
             }
-            Err(_) => {}
         }
 
         tokio::spawn(async move {
