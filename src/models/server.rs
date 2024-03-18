@@ -1,4 +1,4 @@
-use sqlite::Connection;
+use rusqlite::Connection;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::Sender, Mutex};
 

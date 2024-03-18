@@ -11,6 +11,7 @@ use models::rule::ParsedRule;
 use models::server::WebServerState;
 use models::service::ProxyConfig;
 use models::service::ServiceInfo;
+use rusqlite::Connection;
 use serde_yaml;
 use std::collections::HashMap;
 use std::fs;
@@ -47,11 +48,11 @@ async fn main() -> io::Result<()> {
 }
 
 async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Result<()> {
-    let connection = sqlite::open(":memory:").unwrap();
+    let connection = Connection::open_in_memory().unwrap();
     let query = "
         CREATE TABLE rules(id INTEGER, rule TEXT)
     ";
-    connection.execute(query).unwrap();
+    connection.execute(query, ()).unwrap();
 
     let shared_state = Arc::new(WebServerState {
         channels,

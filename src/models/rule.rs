@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub struct ParsedRule {
     pub id: usize,
@@ -12,7 +12,14 @@ pub enum RuleAction {
     RemoveRule,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct RuleDTO {
+    pub service_name: String,
+    pub b64_rule: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rule {
+    pub id: i64,
     pub b64_rule: String,
 }
