@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub struct ParsedRule {
     pub id: usize,
-    pub service_name: String,
-    pub rule: Vec<u8>,
+    pub service_name: Option<String>,
+    pub rule: Option<Vec<u8>>,
     pub action: RuleAction,
 }
 
@@ -22,4 +22,5 @@ pub struct RuleDTO {
 pub struct Rule {
     pub id: i64,
     pub b64_rule: String,
+    pub service_name: String,
 }

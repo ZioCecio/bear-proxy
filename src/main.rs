@@ -1,10 +1,12 @@
 pub mod controllers;
 pub mod models;
 
+use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use axum::Router;
 use controllers::rules::add_rule;
+use controllers::rules::delete_rule;
 use controllers::rules::get_all_rules;
 use futures::future::BoxFuture;
 use models::rule::ParsedRule;
@@ -24,6 +26,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
+
+use crate::models::rule::RuleAction;
 
 extern crate tokio;
 
@@ -50,7 +54,7 @@ async fn main() -> io::Result<()> {
 async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Result<()> {
     let connection = Connection::open_in_memory().unwrap();
     let query = "
-        CREATE TABLE rules(id INTEGER, rule TEXT)
+        CREATE TABLE rules(id INTEGER PRIMARY KEY, rule TEXT, service_name TEXT)
     ";
     connection.execute(query, ()).unwrap();
 
@@ -62,6 +66,7 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
     let app = Router::new()
         .route("/rules", get(get_all_rules))
         .route("/rules", post(add_rule))
+        .route("/rules/:rule_id", delete(delete_rule))
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:1234").await.unwrap();
@@ -75,7 +80,7 @@ async fn start_service(service: ServiceInfo, mut rx: Receiver<ParsedRule>) -> io
     let listener = TcpListener::bind(from).await?;
     println!("Started service {}", service.service_name);
 
-    let rules: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let rules: Arc<Mutex<HashMap<usize, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     loop {
         let rules_clone = Arc::clone(&rules);
 
@@ -86,7 +91,15 @@ async fn start_service(service: ServiceInfo, mut rx: Receiver<ParsedRule>) -> io
             match rx.try_recv() {
                 Ok(message) => {
                     println!("Thread {:?}: {:?}", service.service_name, message.rule);
-                    rules.lock().await.push(message.rule);
+
+                    match message.action {
+                        RuleAction::AddRule => {
+                            rules.lock().await.insert(message.id, message.rule.unwrap());
+                        }
+                        RuleAction::RemoveRule => {
+                            rules.lock().await.remove(&message.id);
+                        }
+                    }
                 }
                 Err(_) => break,
             }
@@ -123,7 +136,7 @@ async fn copy_with_abort<R, W>(
     write: &mut W,
     mut abort: broadcast::Receiver<()>,
     is_client: bool,
-    rules: Option<Vec<Vec<u8>>>,
+    rules: Option<HashMap<usize, Vec<u8>>>,
 ) -> tokio::io::Result<usize>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -153,7 +166,7 @@ where
         }
 
         if is_client {
-            for rule in rules.as_ref().unwrap() {
+            for (_, rule) in rules.as_ref().unwrap() {
                 if find_subsequence(&buf[0..bytes_read], &rule).is_some() {
                     return Ok(0);
                 }
