@@ -1,0 +1,17 @@
+version: "3.2"
+services:
+  proxy-backend:
+    build:
+      dockerfile: Dockerfile-proxy
+    image: ctf_proxy_backend
+    restart: unless-stopped
+    ports:
+      - "1234:1234"
+      - "8080:8080"
+      - "1337:1337"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

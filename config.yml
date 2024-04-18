@@ -1,7 +1,7 @@
 services:
-  - service_name: "python_server"
-    from: "127.0.0.1:3000"
-    to: "127.0.0.1:8000"
-  - service_name: "another_python_server"
-    from: "127.0.0.1:4000"
-    to: "127.0.0.1:9000"
+  - service_name: "FIXME"
+    from: "0.0.0.0:8080"
+    to: "fixme-service-1:8080"
+  - service_name: "TiCCket"
+    from: "0.0.0.0:1337"
+    to: "ticcket-service-1:1337"
