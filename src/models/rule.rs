@@ -12,10 +12,18 @@ pub enum RuleAction {
     RemoveRule,
 }
 
+#[derive(Deserialize, Debug, PartialEq)]
+pub enum RuleTypeDTO {
+    Ascii,
+    Hex,
+    Base64,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct RuleDTO {
     pub service_name: String,
-    pub b64_rule: String,
+    pub rule_text: String,
+    pub rule_type: RuleTypeDTO,
 }
 
 #[derive(Serialize, Deserialize)]

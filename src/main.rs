@@ -1,13 +1,17 @@
 pub mod controllers;
 pub mod models;
+pub mod utils;
 
 use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use axum::Router;
+use controllers::pages::get_home_page;
 use controllers::rules::add_rule;
 use controllers::rules::delete_rule;
 use controllers::rules::get_all_rules;
+use controllers::rules::get_rules_by_service_name;
+use controllers::rules::get_services_names;
 use futures::future::BoxFuture;
 use models::rule::ParsedRule;
 use models::server::WebServerState;
@@ -65,8 +69,14 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
 
     let app = Router::new()
         .route("/rules", get(get_all_rules))
+        .route(
+            "/rules/filter/:service_name",
+            get(get_rules_by_service_name),
+        )
+        .route("/services", get(get_services_names))
         .route("/rules", post(add_rule))
         .route("/rules/:rule_id", delete(delete_rule))
+        .route("/front", get(get_home_page))
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:1234").await.unwrap();

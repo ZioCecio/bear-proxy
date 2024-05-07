@@ -5,3 +5,6 @@ services:
   - service_name: "TiCCket"
     from: "0.0.0.0:1337"
     to: "ticcket-service-1:1337"
+  - service_name: "python-service"
+    from: "localhost:3000"
+    to: "localhost:8000"
