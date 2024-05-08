@@ -1,7 +1,9 @@
 pub mod controllers;
 pub mod models;
 pub mod utils;
+pub mod middlewares;
 
+use axum::middleware;
 use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
@@ -13,6 +15,7 @@ use controllers::rules::get_all_rules;
 use controllers::rules::get_rules_by_service_name;
 use controllers::rules::get_services_names;
 use futures::future::BoxFuture;
+use middlewares::auth::auth;
 use models::rule::ParsedRule;
 use models::server::WebServerState;
 use models::service::ProxyConfig;
@@ -76,6 +79,7 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
         .route("/services", get(get_services_names))
         .route("/rules", post(add_rule))
         .route("/rules/:rule_id", delete(delete_rule))
+        .route_layer(middleware::from_fn(auth))
         .route("/front", get(get_home_page))
         .with_state(shared_state);
 
