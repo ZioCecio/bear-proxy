@@ -12,6 +12,6 @@ pub fn get_response(status_code: StatusCode, message: &str) -> impl IntoResponse
     );
 }
 
-pub fn get_json_reponse<T: Serialize>(status_code: StatusCode, json: T) -> impl IntoResponse {
+pub fn get_json_response<T: Serialize>(status_code: StatusCode, json: T) -> impl IntoResponse {
     return (status_code, Json(json));
 }

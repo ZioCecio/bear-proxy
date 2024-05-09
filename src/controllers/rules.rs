@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::models::rule::{ParsedRule, Rule, RuleAction, RuleDTO, RuleTypeDTO};
 use crate::models::server::WebServerState;
-use crate::utils::response::{get_json_reponse, get_response};
+use crate::utils::response::{get_json_response, get_response};
 
 pub async fn get_all_rules(State(state): State<Arc<WebServerState>>) -> Json<serde_json::Value> {
     let query = "
@@ -131,7 +131,7 @@ pub async fn add_rule(
         service_name: payload.service_name,
     };
 
-    get_json_reponse(StatusCode::CREATED, created_rule).into_response()
+    get_json_response(StatusCode::CREATED, created_rule).into_response()
 }
 
 pub async fn delete_rule(

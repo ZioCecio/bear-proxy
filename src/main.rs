@@ -1,13 +1,14 @@
 pub mod controllers;
+pub mod middlewares;
 pub mod models;
 pub mod utils;
-pub mod middlewares;
 
 use axum::middleware;
 use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use axum::Router;
+use controllers::auth::get_token;
 use controllers::pages::get_home_page;
 use controllers::rules::add_rule;
 use controllers::rules::delete_rule;
@@ -15,7 +16,8 @@ use controllers::rules::get_all_rules;
 use controllers::rules::get_rules_by_service_name;
 use controllers::rules::get_services_names;
 use futures::future::BoxFuture;
-use middlewares::auth::auth;
+use middlewares::auth::extract_token;
+use middlewares::auth::protect_api;
 use models::rule::ParsedRule;
 use models::server::WebServerState;
 use models::service::ProxyConfig;
@@ -40,6 +42,7 @@ extern crate tokio;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    dotenv::dotenv().ok();
     let file_content = fs::read_to_string("config.yml")?;
 
     let proxy_config: ProxyConfig = serde_yaml::from_str(&file_content).unwrap();
@@ -79,8 +82,10 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
         .route("/services", get(get_services_names))
         .route("/rules", post(add_rule))
         .route("/rules/:rule_id", delete(delete_rule))
-        .route_layer(middleware::from_fn(auth))
+        .route_layer(middleware::from_fn(protect_api))
         .route("/front", get(get_home_page))
+        .route_layer(middleware::from_fn(extract_token))
+        .route("/get_token", post(get_token))
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:1234").await.unwrap();
