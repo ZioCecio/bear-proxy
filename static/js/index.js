@@ -182,6 +182,4 @@ async function main() {
     await writeServicesAndRules();
 }
 
-$(document).onload(() => {
-    main();
-});
+main(); 
