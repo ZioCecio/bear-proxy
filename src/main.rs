@@ -3,6 +3,7 @@ pub mod middlewares;
 pub mod models;
 pub mod utils;
 
+use crate::models::rule::RuleAction;
 use axum::middleware;
 use axum::routing::delete;
 use axum::routing::get;
@@ -35,8 +36,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
-
-use crate::models::rule::RuleAction;
+use tower_http::services::ServeDir;
 
 extern crate tokio;
 
@@ -86,6 +86,7 @@ async fn handle_rules(channels: HashMap<String, Sender<ParsedRule>>) -> io::Resu
         .route("/front", get(get_home_page))
         .route_layer(middleware::from_fn(extract_token))
         .route("/get_token", post(get_token))
+        .nest_service("/static", ServeDir::new("static"))
         .with_state(shared_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:1234").await.unwrap();
