@@ -8,6 +8,7 @@ ENV BINARY_NAME=$BINARY_NAME_DEFAULT
 
 COPY Cargo.lock .
 COPY Cargo.toml .
+
 RUN mkdir src \
     && echo "fn main() {print!(\"Dummy main\");} // dummy file" > src/main.rs
 RUN set -x && cargo build --target x86_64-unknown-linux-musl --release
@@ -30,4 +31,6 @@ ENV BINARY_NAME=$BINARY_NAME_DEFAULT
 
 COPY --from=builder /build-out/$BINARY_NAME /
 COPY ./config.yml .
+COPY .env .
+COPY static ./static
 CMD ["/ctf-proxy"]
